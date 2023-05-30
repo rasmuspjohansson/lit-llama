@@ -24,6 +24,7 @@ from lit_llama.tokenizer import Tokenizer
 from scripts.prepare_alpaca import generate_prompt
 
 
+instruction_tuning = True
 eval_interval = 100
 save_interval = 100
 eval_iters = 100
@@ -33,14 +34,15 @@ log_interval = 1
 learning_rate = 3e-4
 batch_size = 128
 micro_batch_size = 4
-gradient_accumulation_steps = batch_size // micro_batch_size
+gradient_accumulation_iters = batch_size // micro_batch_size
+assert gradient_accumulation_iters > 0
 max_iters = 50000 * 3 // micro_batch_size
 weight_decay = 0.0
 max_seq_length = 256  # see scripts/prepare_alpaca.py
 lora_r = 8
 lora_alpha = 16
 lora_dropout = 0.05
-warmup_steps = 100
+warmup_iters = 100
 
 
 def main(
@@ -97,9 +99,9 @@ def train(
 
     for iter_num in range(max_iters):
 
-        if step_count <= warmup_steps:
+        if step_count <= warmup_iters:
             # linear warmup
-            lr = learning_rate * step_count / warmup_steps
+            lr = learning_rate * step_count / warmup_iters
             for param_group in optimizer.param_groups:
                 param_group['lr'] = lr
 
@@ -110,7 +112,7 @@ def train(
         loss = loss_fn(logits, targets)
         fabric.backward(loss)
 
-        if (iter_num + 1) % gradient_accumulation_steps == 0:
+        if (iter_num + 1) % gradient_accumulation_iters == 0:
             optimizer.step()
             optimizer.zero_grad()
             step_count += 1
@@ -135,7 +137,9 @@ def train(
 def generate_response(model, instruction, tokenizer_path):
     tokenizer = Tokenizer(tokenizer_path)
     sample = {"instruction": instruction, "input": ""}
-    prompt = generate_prompt(sample)
+    prompt = instruction
+    if instruction_tuning:
+        prompt = generate_prompt(sample)
     encoded = tokenizer.encode(prompt, bos=True, eos=False, device=model.device)
 
     output = generate(
